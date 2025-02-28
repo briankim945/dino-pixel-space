@@ -126,6 +126,10 @@ def get_args_parser():
     parser.add_argument("--dist_url", default="env://", type=str, help="""url used to set up
         distributed training; see https://pytorch.org/docs/stable/distributed.html""")
     parser.add_argument("--local_rank", default=0, type=int, help="Please ignore and do not set this argument.")
+
+    # For MAE
+    parser.add_argument('--input_size', default=224, type=int,
+                        help='images input size')
     return parser
 
 
@@ -137,12 +141,22 @@ def train_dino(args):
     cudnn.benchmark = True
 
     # ============ preparing data ... ============
-    transform = DataAugmentationDINO(
-        args.global_crops_scale,
-        args.local_crops_scale,
-        args.local_crops_number,
-    )
-    dataset = datasets.ImageFolder(args.data_path, transform=transform)
+    # transform = DataAugmentationDINO(
+    #     args.global_crops_scale,
+    #     args.local_crops_scale,
+    #     args.local_crops_number,
+    # )
+    # dataset = datasets.ImageFolder(args.data_path, transform=transform)
+
+    # MAE transformation start
+    transform_train = transforms.Compose([
+            transforms.RandomResizedCrop(args.input_size, scale=(0.2, 1.0), interpolation=3),  # 3 is bicubic
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
+    dataset = datasets.ImageFolder(os.path.join(args.data_path, 'train'), transform=transform_train)
+    # MAE transformation end
+
     sampler = torch.utils.data.DistributedSampler(dataset, shuffle=True)
     data_loader = torch.utils.data.DataLoader(
         dataset,
