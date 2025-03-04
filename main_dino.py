@@ -505,16 +505,15 @@ class DataAugmentationDINOPixel(object):
         self.pos_embed.data.copy_(torch.from_numpy(pos_embed).float().unsqueeze(0))
 
     def __call__(self, image):
-        img = pil_to_tensor(image)
         crops = []
 
         # Global crops (2)
-        crops.append(self.global_transfo(img))
-        crops.append(self.global_transfo(img))
+        crops.append(self.global_transfo(image))
+        crops.append(self.global_transfo(image))
 
         # Local crops
         for _ in range(self.local_crops_number):
-            img = self.local_transfo(pil_to_tensor(image))
+            img = self.local_transfo(image)
 
             img = img.unsqueeze(dim=0)
             img = torch.einsum('nhwc->nchw', img)
