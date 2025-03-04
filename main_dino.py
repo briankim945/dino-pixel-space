@@ -508,12 +508,23 @@ class DataAugmentationDINOPixel(object):
         crops = []
 
         # Global crops (2)
-        crops.append(self.global_transfo(image))
-        crops.append(self.global_transfo(image))
+        for _ in range(2):
+            img = self.global_transfo(image)
+
+            img = img.unsqueeze(dim=0)
+            print("img shape:", img.shape)
+
+            img = self.patch_embed(img.float())
+
+            img = img + self.pos_embed[:, 1:, :]
+
+            crops.append(img)
 
         # Local crops
         for _ in range(self.local_crops_number):
             img = self.local_transfo(image)
+
+            img = img.unsqueeze(dim=0)
 
             img = self.patch_embed(img.float())
 
