@@ -30,6 +30,7 @@ import torch.nn.functional as F
 from torchvision import datasets, transforms
 from torchvision import models as torchvision_models
 from timm.models.vision_transformer import PatchEmbed
+from torchvision.transforms.functional import pil_to_tensor
 
 import utils
 import vision_transformer as vits
@@ -504,8 +505,7 @@ class DataAugmentationDINOPixel(object):
         self.pos_embed.data.copy_(torch.from_numpy(pos_embed).float().unsqueeze(0))
 
     def __call__(self, image):
-        print(image, type(image))
-        img = torch.tensor(image)
+        img = pil_to_tensor(image)
         crops = []
 
         # Global crops (2)
@@ -514,7 +514,7 @@ class DataAugmentationDINOPixel(object):
 
         # Local crops
         for _ in range(self.local_crops_number):
-            img = self.local_transfo(torch.tensor(image))
+            img = self.local_transfo(pil_to_tensor(image))
 
             img = img.unsqueeze(dim=0)
             img = torch.einsum('nhwc->nchw', img)
