@@ -29,6 +29,7 @@ import torch.backends.cudnn as cudnn
 import torch.nn.functional as F
 from torchvision import datasets, transforms
 from torchvision import models as torchvision_models
+from timm.models.vision_transformer import PatchEmbed
 
 import utils
 import vision_transformer as vits
@@ -141,22 +142,12 @@ def train_dino(args):
     cudnn.benchmark = True
 
     # ============ preparing data ... ============
-    # transform = DataAugmentationDINO(
-    #     args.global_crops_scale,
-    #     args.local_crops_scale,
-    #     args.local_crops_number,
-    # )
-    # dataset = datasets.ImageFolder(args.data_path, transform=transform)
-
-    # MAE transformation start
-    transform_train = transforms.Compose([
-            transforms.RandomResizedCrop(args.input_size, scale=(0.2, 1.0), interpolation=3),  # 3 is bicubic
-            transforms.RandomHorizontalFlip(),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
-    dataset = datasets.ImageFolder(os.path.join(args.data_path, 'train'), transform=transform_train)
-    # MAE transformation end
-
+    transform = DataAugmentationDINOPixel(
+        args.global_crops_scale,
+        args.local_crops_scale,
+        args.local_crops_number,
+    )
+    dataset = datasets.ImageFolder(args.data_path, transform=transform)
     sampler = torch.utils.data.DistributedSampler(dataset, shuffle=True)
     data_loader = torch.utils.data.DataLoader(
         dataset,
@@ -329,7 +320,7 @@ def train_one_epoch(student, teacher, teacher_without_ddp, dino_loss, data_loade
         images = [im.cuda(non_blocking=True) for im in images]
         # teacher and student forward passes + compute dino loss
         with torch.cuda.amp.autocast(fp16_scaler is not None):
-            teacher_output = teacher(images[:2])  # only the 2 global views pass through the teacher
+            teacher_output = teacher(images[:1])  # only the 1 global view pass through the teacher
             student_output = student(images)
             loss = dino_loss(student_output, teacher_output, epoch)
 
@@ -475,6 +466,59 @@ class DataAugmentationDINO(object):
         crops.append(self.global_transfo2(image))
         for _ in range(self.local_crops_number):
             crops.append(self.local_transfo(image))
+        return crops
+    
+class DataAugmentationDINOPixel(object):
+    def __init__(self, global_crops_scale, local_crops_scale, local_crops_number):
+        self.IMG_SIZE = 224
+        self.PATCH_SIZE = 16
+        self.IN_CHANS = 3
+        self.EMBED_DIM = 1024
+
+        self.imagenet_mean = np.array([0.485, 0.456, 0.406])
+        self.imagenet_std = np.array([0.229, 0.224, 0.225])
+
+        self.patch_embed = PatchEmbed(self.IMG_SIZE, self.PATCH_SIZE, self.IN_CHANS, self.EMBED_DIM)
+
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, self.EMBED_DIM))
+
+        # MAE transformation
+        self.global_transfo = transforms.Compose([
+            transforms.RandomResizedCrop(self.IMG_SIZE, scale=(0.2, 1.0), interpolation=3),  # 3 is bicubic
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        ])
+
+    def __call__(self, image):
+        crops = []
+
+        # Global crops (2)
+        crops.append(self.global_transfo(image))
+        crops.append(self.global_transfo(image))
+
+        # Local crops
+        for _ in range(self.local_crops_number):
+            img = self.global_transfo(image)
+            num_patches = self.patch_embed.num_patches
+
+            pos_embed = nn.Parameter(torch.zeros(1, num_patches + 1, self.EMBED_DIM), requires_grad=False)
+            pos_embed_tmp = utils.get_2d_sincos_pos_embed(pos_embed.shape[-1], int(self.patch_embed.num_patches**.5), cls_token=True)
+            pos_embed.data.copy_(torch.from_numpy(pos_embed_tmp).float().unsqueeze(0))
+
+            img = torch.tensor(img)
+            img = img.unsqueeze(dim=0)
+            img = torch.einsum('nhwc->nchw', img)
+
+            img = self.patch_embed(img.float())
+
+            img = img + pos_embed[:, 1:, :]
+
+            img, mask, ids_restore = utils.random_masking(img.float(), 0.75)
+
+            cls_token = self.cls_token + pos_embed[:, :1, :]
+            cls_tokens = cls_token.expand(img.shape[0], -1, -1)
+            crops.append(torch.cat((cls_tokens, img), dim=1))
         return crops
 
 
