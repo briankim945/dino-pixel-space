@@ -497,7 +497,14 @@ class DataAugmentationDINOPixel(object):
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         ])
 
+        num_patches = self.patch_embed.num_patches
+
+        self.pos_embed = nn.Parameter(torch.zeros(1, num_patches + 1, self.EMBED_DIM), requires_grad=False)
+        self.pos_embed = utils.get_2d_sincos_pos_embed(self.pos_embed.shape[-1], int(self.patch_embed.num_patches**.5), cls_token=True)
+        self.pos_embed.data.copy_(torch.from_numpy(self.pos_embed).float().unsqueeze(0))
+
     def __call__(self, image):
+        print("IMAGE SHAPE:", image.shape)
         crops = []
 
         # Global crops (2)
@@ -507,11 +514,6 @@ class DataAugmentationDINOPixel(object):
         # Local crops
         for _ in range(self.local_crops_number):
             img = self.local_transfo(image)
-            num_patches = self.patch_embed.num_patches
-
-            pos_embed = nn.Parameter(torch.zeros(1, num_patches + 1, self.EMBED_DIM), requires_grad=False)
-            pos_embed_tmp = utils.get_2d_sincos_pos_embed(pos_embed.shape[-1], int(self.patch_embed.num_patches**.5), cls_token=True)
-            pos_embed.data.copy_(torch.from_numpy(pos_embed_tmp).float().unsqueeze(0))
 
             img = torch.tensor(img)
             img = img.unsqueeze(dim=0)
@@ -519,11 +521,11 @@ class DataAugmentationDINOPixel(object):
 
             img = self.patch_embed(img.float())
 
-            img = img + pos_embed[:, 1:, :]
+            img = img + self.pos_embed[:, 1:, :]
 
             img, mask, ids_restore = utils.random_masking(img.float(), 0.75)
 
-            cls_token = self.cls_token + pos_embed[:, :1, :]
+            cls_token = self.cls_token + self.pos_embed[:, :1, :]
             cls_tokens = cls_token.expand(img.shape[0], -1, -1)
             crops.append(torch.cat((cls_tokens, img), dim=1))
         return crops
