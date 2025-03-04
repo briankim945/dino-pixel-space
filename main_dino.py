@@ -480,7 +480,7 @@ class DataAugmentationDINOPixel(object):
 
         self.patch_embed = PatchEmbed(self.IMG_SIZE, self.PATCH_SIZE, self.IN_CHANS, self.EMBED_DIM)
 
-        self.cls_token = nn.Parameter(torch.zeros(1, 1, self.EMBED_DIM), requires_grad=False)
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, self.EMBED_DIM))
 
         # MAE transformation
         self.global_transfo = transforms.Compose([
@@ -504,36 +504,37 @@ class DataAugmentationDINOPixel(object):
         self.pos_embed.data.copy_(torch.from_numpy(pos_embed).float().unsqueeze(0))
 
     def __call__(self, image):
-        crops = []
+        with torch.no_grad():
+            crops = []
 
-        # Global crops (2)
-        for _ in range(2):
-            img = self.global_transfo(image)
+            # Global crops (2)
+            for _ in range(2):
+                img = self.global_transfo(image)
 
-            img = img.unsqueeze(dim=0)
+                img = img.unsqueeze(dim=0)
 
-            img = self.patch_embed(img.float())
+                img = self.patch_embed(img.float())
 
-            img = img + self.pos_embed[:, 1:, :]
+                img = img + self.pos_embed[:, 1:, :]
 
-            crops.append(img)
+                crops.append(img)
 
-        # Local crops
-        for _ in range(self.local_crops_number):
-            img = self.local_transfo(image)
+            # Local crops
+            for _ in range(self.local_crops_number):
+                img = self.local_transfo(image)
 
-            img = img.unsqueeze(dim=0)
+                img = img.unsqueeze(dim=0)
 
-            img = self.patch_embed(img.float())
+                img = self.patch_embed(img.float())
 
-            img = img + self.pos_embed[:, 1:, :]
+                img = img + self.pos_embed[:, 1:, :]
 
-            img, mask, ids_restore = utils.random_masking(img.float(), 0.75)
+                img, mask, ids_restore = utils.random_masking(img.float(), 0.75)
 
-            cls_token = self.cls_token + self.pos_embed[:, :1, :]
-            cls_tokens = cls_token.expand(img.shape[0], -1, -1)
-            crops.append(torch.cat((cls_tokens, img), dim=1))
-        return crops
+                cls_token = self.cls_token + self.pos_embed[:, :1, :]
+                cls_tokens = cls_token.expand(img.shape[0], -1, -1)
+                crops.append(torch.cat((cls_tokens, img), dim=1))
+            return crops
 
 
 if __name__ == '__main__':
