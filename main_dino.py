@@ -512,7 +512,6 @@ class DataAugmentationDINOPixel(object):
             img = self.global_transfo(image)
 
             img = img.unsqueeze(dim=0)
-            print("img shape:", img.shape)
 
             img = self.patch_embed(img.float())
 
