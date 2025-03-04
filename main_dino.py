@@ -515,9 +515,6 @@ class DataAugmentationDINOPixel(object):
         for _ in range(self.local_crops_number):
             img = self.local_transfo(image)
 
-            img = img.unsqueeze(dim=0)
-            img = torch.einsum('nhwc->nchw', img)
-
             img = self.patch_embed(img.float())
 
             img = img + self.pos_embed[:, 1:, :]
