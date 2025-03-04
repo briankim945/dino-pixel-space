@@ -484,7 +484,14 @@ class DataAugmentationDINOPixel(object):
 
         # MAE transformation
         self.global_transfo = transforms.Compose([
-            transforms.RandomResizedCrop(self.IMG_SIZE, scale=(0.2, 1.0), interpolation=3),  # 3 is bicubic
+            transforms.RandomResizedCrop(self.IMG_SIZE, scale=global_crops_scale, interpolation=3),  # 3 is bicubic
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        ])
+        self.local_crops_number = local_crops_number
+        self.local_transfo = transforms.Compose([
+            transforms.RandomResizedCrop(self.IMG_SIZE, scale=local_crops_scale, interpolation=3),  # 3 is bicubic
             transforms.RandomHorizontalFlip(),
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
@@ -499,7 +506,7 @@ class DataAugmentationDINOPixel(object):
 
         # Local crops
         for _ in range(self.local_crops_number):
-            img = self.global_transfo(image)
+            img = self.local_transfo(image)
             num_patches = self.patch_embed.num_patches
 
             pos_embed = nn.Parameter(torch.zeros(1, num_patches + 1, self.EMBED_DIM), requires_grad=False)
