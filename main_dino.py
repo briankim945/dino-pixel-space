@@ -30,7 +30,6 @@ import torch.nn.functional as F
 from torchvision import datasets, transforms
 from torchvision import models as torchvision_models
 from timm.models.vision_transformer import PatchEmbed
-from torchvision.transforms.functional import pil_to_tensor
 
 import utils
 import vision_transformer as vits
@@ -481,7 +480,7 @@ class DataAugmentationDINOPixel(object):
 
         self.patch_embed = PatchEmbed(self.IMG_SIZE, self.PATCH_SIZE, self.IN_CHANS, self.EMBED_DIM)
 
-        self.cls_token = nn.Parameter(torch.zeros(1, 1, self.EMBED_DIM))
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, self.EMBED_DIM), requires_grad=False)
 
         # MAE transformation
         self.global_transfo = transforms.Compose([
