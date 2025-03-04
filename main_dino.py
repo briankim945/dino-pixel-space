@@ -504,6 +504,7 @@ class DataAugmentationDINOPixel(object):
         self.pos_embed.data.copy_(torch.from_numpy(pos_embed).float().unsqueeze(0))
 
     def __call__(self, image):
+        print(image, type(image))
         img = torch.tensor(image)
         crops = []
 
