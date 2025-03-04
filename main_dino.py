@@ -500,8 +500,8 @@ class DataAugmentationDINOPixel(object):
         num_patches = self.patch_embed.num_patches
 
         self.pos_embed = nn.Parameter(torch.zeros(1, num_patches + 1, self.EMBED_DIM), requires_grad=False)
-        self.pos_embed = utils.get_2d_sincos_pos_embed(self.pos_embed.shape[-1], int(self.patch_embed.num_patches**.5), cls_token=True)
-        self.pos_embed.data.copy_(torch.from_numpy(self.pos_embed).float().unsqueeze(0))
+        pos_embed = utils.get_2d_sincos_pos_embed(self.pos_embed.shape[-1], int(self.patch_embed.num_patches**.5), cls_token=True)
+        self.pos_embed.data.copy_(torch.from_numpy(pos_embed).float().unsqueeze(0))
 
     def __call__(self, image):
         print("IMAGE SHAPE:", image.shape)
