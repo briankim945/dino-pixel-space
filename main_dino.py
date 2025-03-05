@@ -141,24 +141,6 @@ def train_dino(args):
     print("\n".join("%s: %s" % (k, str(v)) for k, v in sorted(dict(vars(args)).items())))
     cudnn.benchmark = True
 
-    # ============ preparing data ... ============
-    transform = DataAugmentationDINOPixel(
-        args.global_crops_scale,
-        args.local_crops_scale,
-        args.local_crops_number,
-    )
-    dataset = datasets.ImageFolder(args.data_path, transform=transform)
-    sampler = torch.utils.data.DistributedSampler(dataset, shuffle=True)
-    data_loader = torch.utils.data.DataLoader(
-        dataset,
-        sampler=sampler,
-        batch_size=args.batch_size_per_gpu,
-        num_workers=args.num_workers,
-        pin_memory=True,
-        drop_last=True,
-    )
-    print(f"Data loaded: there are {len(dataset)} images.")
-
     # ============ building student and teacher networks ... ============
     # we changed the name DeiT-S for ViT-S to avoid confusions
     args.arch = args.arch.replace("deit", "vit")
@@ -215,6 +197,26 @@ def train_dino(args):
     for p in teacher.parameters():
         p.requires_grad = False
     print(f"Student and Teacher are built: they are both {args.arch} network.")
+
+    # ============ preparing data ... ============
+    # Moved after building networks to capture embed_dim
+    transform = DataAugmentationDINOPixel(
+        args.global_crops_scale,
+        args.local_crops_scale,
+        args.local_crops_number,
+        embed_dim=embed_dim
+    )
+    dataset = datasets.ImageFolder(args.data_path, transform=transform)
+    sampler = torch.utils.data.DistributedSampler(dataset, shuffle=True)
+    data_loader = torch.utils.data.DataLoader(
+        dataset,
+        sampler=sampler,
+        batch_size=args.batch_size_per_gpu,
+        num_workers=args.num_workers,
+        pin_memory=True,
+        drop_last=True,
+    )
+    print(f"Data loaded: there are {len(dataset)} images.")
 
     # ============ preparing loss ... ============
     dino_loss = DINOLoss(
@@ -469,39 +471,46 @@ class DataAugmentationDINO(object):
         return crops
     
 class DataAugmentationDINOPixel(object):
-    def __init__(self, global_crops_scale, local_crops_scale, local_crops_number):
-        self.IMG_SIZE = 224
+    def __init__(self, global_crops_scale, local_crops_scale, local_crops_number, embed_dim=1024):
+        self.GLOBAL_IMG_SIZE = 224
+        self.LOCAL_IMG_SIZE = 96
         self.PATCH_SIZE = 16
         self.IN_CHANS = 3
-        self.EMBED_DIM = 1024
+        self.EMBED_DIM = embed_dim
 
         self.imagenet_mean = np.array([0.485, 0.456, 0.406])
         self.imagenet_std = np.array([0.229, 0.224, 0.225])
 
-        self.patch_embed = PatchEmbed(self.IMG_SIZE, self.PATCH_SIZE, self.IN_CHANS, self.EMBED_DIM)
+        self.global_patch_embed = PatchEmbed(self.GLOBAL_IMG_SIZE, self.PATCH_SIZE, self.IN_CHANS, self.EMBED_DIM)
+        self.local_patch_embed = PatchEmbed(self.LOCAL_IMG_SIZE, self.PATCH_SIZE, self.IN_CHANS, self.EMBED_DIM)
 
         self.cls_token = nn.Parameter(torch.zeros(1, 1, self.EMBED_DIM))
 
         # MAE transformation
         self.global_transfo = transforms.Compose([
-            transforms.RandomResizedCrop(self.IMG_SIZE, scale=global_crops_scale, interpolation=3),  # 3 is bicubic
+            transforms.RandomResizedCrop(self.GLOBAL_IMG_SIZE, scale=global_crops_scale, interpolation=3),  # 3 is bicubic
             transforms.RandomHorizontalFlip(),
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         ])
         self.local_crops_number = local_crops_number
         self.local_transfo = transforms.Compose([
-            transforms.RandomResizedCrop(self.IMG_SIZE, scale=local_crops_scale, interpolation=3),  # 3 is bicubic
+            transforms.RandomResizedCrop(self.LOCAL_IMG_SIZE, scale=local_crops_scale, interpolation=3),  # 3 is bicubic
             transforms.RandomHorizontalFlip(),
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         ])
 
-        num_patches = self.patch_embed.num_patches
+        global_num_patches = self.global_patch_embed.num_patches
+        local_num_patches = self.local_patch_embed.num_patches
 
-        self.pos_embed = nn.Parameter(torch.zeros(1, num_patches + 1, self.EMBED_DIM), requires_grad=False)
-        pos_embed = utils.get_2d_sincos_pos_embed(self.pos_embed.shape[-1], int(self.patch_embed.num_patches**.5), cls_token=True)
-        self.pos_embed.data.copy_(torch.from_numpy(pos_embed).float().unsqueeze(0))
+        self.global_pos_embed = nn.Parameter(torch.zeros(1, global_num_patches + 1, self.EMBED_DIM), requires_grad=False)
+        pos_embed = utils.get_2d_sincos_pos_embed(self.global_pos_embed.shape[-1], int(self.patch_embed.global_num_patches**.5), cls_token=True)
+        self.global_pos_embed.data.copy_(torch.from_numpy(pos_embed).float().unsqueeze(0))
+
+        self.local_pos_embed = nn.Parameter(torch.zeros(1, local_num_patches + 1, self.EMBED_DIM), requires_grad=False)
+        pos_embed = utils.get_2d_sincos_pos_embed(self.local_pos_embed.shape[-1], int(self.patch_embed.local_num_patches**.5), cls_token=True)
+        self.local_pos_embed.data.copy_(torch.from_numpy(pos_embed).float().unsqueeze(0))
 
     def __call__(self, image):
         with torch.no_grad():
@@ -513,9 +522,9 @@ class DataAugmentationDINOPixel(object):
 
                 img = img.unsqueeze(dim=0)
 
-                img = self.patch_embed(img.float())
+                img = self.global_patch_embed(img.float())
 
-                img = img + self.pos_embed[:, 1:, :]
+                img = img + self.global_pos_embed[:, 1:, :]
 
                 crops.append(img)
 
@@ -525,16 +534,42 @@ class DataAugmentationDINOPixel(object):
 
                 img = img.unsqueeze(dim=0)
 
-                img = self.patch_embed(img.float())
+                img = self.local_patch_embed(img.float())
 
-                img = img + self.pos_embed[:, 1:, :]
+                img = img + self.local_pos_embed[:, 1:, :]
 
                 img, mask, ids_restore = utils.random_masking(img.float(), 0.75)
 
-                cls_token = self.cls_token + self.pos_embed[:, :1, :]
+                cls_token = self.cls_token + self.local_pos_embed[:, :1, :]
                 cls_tokens = cls_token.expand(img.shape[0], -1, -1)
                 crops.append(torch.cat((cls_tokens, img), dim=1))
             return crops
+        
+        def generate_masked_image(self, mask, img, patch_embed):
+            # visualize the mask
+            mask = mask.detach()
+            mask = mask.unsqueeze(-1).repeat(1, 1, patch_embed.patch_size[0]**2 *3)  # (N, H*W, p*p*3)
+            mask = self.unpatchify(mask, patch_embed)  # 1 is removing, 0 is keeping
+            mask = torch.einsum('nchw->nhwc', mask).detach().cpu()
+
+            img = torch.einsum('nchw->nhwc', img)
+
+            # masked image
+            return img * (1 - mask)
+        
+        def unpatchify(self, x, patch_embed):
+            """
+            x: (N, L, patch_size**2 *3)
+            imgs: (N, 3, H, W)
+            """
+            p = patch_embed.patch_size[0]
+            h = w = int(x.shape[1]**.5)
+            assert h * w == x.shape[1]
+            
+            x = x.reshape(shape=(x.shape[0], h, w, p, p, 3))
+            x = torch.einsum('nhwpqc->nchpwq', x)
+            imgs = x.reshape(shape=(x.shape[0], 3, h * p, h * p))
+            return imgs
 
 
 if __name__ == '__main__':
