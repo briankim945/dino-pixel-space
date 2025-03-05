@@ -24,6 +24,10 @@ import torch.nn as nn
 from utils import trunc_normal_
 
 
+MASK_RATIO = 0.75
+GLOBAL_CROPS_COUNT = 2
+
+
 def drop_path(x, drop_prob: float = 0., training: bool = False):
     if drop_prob == 0. or not training:
         return x
@@ -201,6 +205,14 @@ class VisionTransformer(nn.Module):
         cls_tokens = self.cls_token.expand(B, -1, -1)
         x = torch.cat((cls_tokens, x), dim=1)
 
+        ### For local crops ###
+
+        # masking: length -> length * mask_ratio
+        x_masked, mask, ids_restore = self.random_masking(x[GLOBAL_CROPS_COUNT:], MASK_RATIO)
+        x[GLOBAL_CROPS_COUNT:] = x_masked
+
+        ## END local crops processing ###
+
         # add positional encoding to each token
         x = x + self.interpolate_pos_encoding(x, w, h)
 
@@ -231,6 +243,34 @@ class VisionTransformer(nn.Module):
             if len(self.blocks) - i <= n:
                 output.append(self.norm(x))
         return output
+    
+    # Masking functionality
+    def random_masking(self, x, mask_ratio):
+        """
+        Perform per-sample random masking by per-sample shuffling.
+        Per-sample shuffling is done by argsort random noise.
+        x: [N, L, D], sequence
+        """
+        N, L, D = x.shape  # batch, length, dim
+        len_keep = int(L * (1 - mask_ratio))
+        
+        noise = torch.rand(N, L, device=x.device)  # noise in [0, 1]
+        
+        # sort noise for each sample
+        ids_shuffle = torch.argsort(noise, dim=1)  # ascend: small is keep, large is remove
+        ids_restore = torch.argsort(ids_shuffle, dim=1)
+
+        # keep the first subset
+        ids_keep = ids_shuffle[:, :len_keep]
+        x_masked = torch.gather(x, dim=1, index=ids_keep.unsqueeze(-1).repeat(1, 1, D))
+
+        # generate the binary mask: 0 is keep, 1 is remove
+        mask = torch.ones([N, L], device=x.device)
+        mask[:, :len_keep] = 0
+        # unshuffle to get the binary mask
+        mask = torch.gather(mask, dim=1, index=ids_restore)
+
+        return x_masked, mask, ids_restore
 
 
 def vit_tiny(patch_size=16, **kwargs):
