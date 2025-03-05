@@ -519,57 +519,13 @@ class DataAugmentationDINOPixel(object):
             # Global crops (2)
             for _ in range(2):
                 img = self.global_transfo(image)
-
-                img = img.unsqueeze(dim=0)
-
-                img = self.global_patch_embed(img.float())
-
-                img = img + self.global_pos_embed[:, 1:, :]
-
                 crops.append(img)
 
             # Local crops
             for _ in range(self.local_crops_number):
                 img = self.local_transfo(image)
-
-                img = img.unsqueeze(dim=0)
-
-                img = self.local_patch_embed(img.float())
-
-                img = img + self.local_pos_embed[:, 1:, :]
-
-                img, mask, ids_restore = utils.random_masking(img.float(), 0.75)
-
-                cls_token = self.cls_token + self.local_pos_embed[:, :1, :]
-                cls_tokens = cls_token.expand(img.shape[0], -1, -1)
-                crops.append(torch.cat((cls_tokens, img), dim=1))
+                crops.append(img)
             return crops
-        
-        def generate_masked_image(self, mask, img, patch_embed):
-            # visualize the mask
-            mask = mask.detach()
-            mask = mask.unsqueeze(-1).repeat(1, 1, patch_embed.patch_size[0]**2 *3)  # (N, H*W, p*p*3)
-            mask = self.unpatchify(mask, patch_embed)  # 1 is removing, 0 is keeping
-            mask = torch.einsum('nchw->nhwc', mask).detach().cpu()
-
-            img = torch.einsum('nchw->nhwc', img)
-
-            # masked image
-            return img * (1 - mask)
-        
-        def unpatchify(self, x, patch_embed):
-            """
-            x: (N, L, patch_size**2 *3)
-            imgs: (N, 3, H, W)
-            """
-            p = patch_embed.patch_size[0]
-            h = w = int(x.shape[1]**.5)
-            assert h * w == x.shape[1]
-            
-            x = x.reshape(shape=(x.shape[0], h, w, p, p, 3))
-            x = torch.einsum('nhwpqc->nchpwq', x)
-            imgs = x.reshape(shape=(x.shape[0], 3, h * p, h * p))
-            return imgs
 
 
 if __name__ == '__main__':
