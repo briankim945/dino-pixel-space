@@ -474,17 +474,6 @@ class DataAugmentationDINOPixel(object):
     def __init__(self, global_crops_scale, local_crops_scale, local_crops_number, embed_dim=1024):
         self.GLOBAL_IMG_SIZE = 224
         self.LOCAL_IMG_SIZE = 96
-        self.PATCH_SIZE = 16
-        self.IN_CHANS = 3
-        self.EMBED_DIM = embed_dim
-
-        self.imagenet_mean = np.array([0.485, 0.456, 0.406])
-        self.imagenet_std = np.array([0.229, 0.224, 0.225])
-
-        self.global_patch_embed = PatchEmbed(self.GLOBAL_IMG_SIZE, self.PATCH_SIZE, self.IN_CHANS, self.EMBED_DIM)
-        self.local_patch_embed = PatchEmbed(self.LOCAL_IMG_SIZE, self.PATCH_SIZE, self.IN_CHANS, self.EMBED_DIM)
-
-        self.cls_token = nn.Parameter(torch.zeros(1, 1, self.EMBED_DIM))
 
         # MAE transformation
         self.global_transfo = transforms.Compose([
@@ -500,17 +489,6 @@ class DataAugmentationDINOPixel(object):
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         ])
-
-        global_num_patches = self.global_patch_embed.num_patches
-        local_num_patches = self.local_patch_embed.num_patches
-
-        self.global_pos_embed = nn.Parameter(torch.zeros(1, global_num_patches + 1, self.EMBED_DIM), requires_grad=False)
-        pos_embed = utils.get_2d_sincos_pos_embed(self.global_pos_embed.shape[-1], int(self.patch_embed.global_num_patches**.5), cls_token=True)
-        self.global_pos_embed.data.copy_(torch.from_numpy(pos_embed).float().unsqueeze(0))
-
-        self.local_pos_embed = nn.Parameter(torch.zeros(1, local_num_patches + 1, self.EMBED_DIM), requires_grad=False)
-        pos_embed = utils.get_2d_sincos_pos_embed(self.local_pos_embed.shape[-1], int(self.patch_embed.local_num_patches**.5), cls_token=True)
-        self.local_pos_embed.data.copy_(torch.from_numpy(pos_embed).float().unsqueeze(0))
 
     def __call__(self, image):
         with torch.no_grad():
