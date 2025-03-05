@@ -261,8 +261,9 @@ class VisionTransformer(nn.Module):
         ids_restore = torch.argsort(ids_shuffle, dim=1)
 
         # keep the first subset
-        ids_keep = ids_shuffle[:, :len_keep]
-        x_masked = torch.gather(x, dim=1, index=ids_keep.unsqueeze(-1).repeat(1, 1, D))
+        ids_lose = ids_shuffle[:, len_keep:]
+        x_masked = x.detach().clone()
+        x_masked[:,ids_lose,:] = 1 # SET MASK to 1
 
         # generate the binary mask: 0 is keep, 1 is remove
         mask = torch.ones([N, L], device=x.device)
